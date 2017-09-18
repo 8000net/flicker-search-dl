@@ -1,6 +1,5 @@
 import os
 import sys
-from urllib.request import urlretrieve
 import xml.etree.ElementTree as ET
 
 import requests
@@ -9,10 +8,14 @@ API_KEY = ''
 URL = 'https://api.flickr.com/services/rest/'
 METHOD = 'flickr.photos.search'
 
-def download_photo(farm, server, id, secret, dl_path):
+def download_photo(farm, server, id, secret):
+    """
+    Return bytes array of photo
+    """
     url = 'https://farm%s.staticflickr.com/%s/%s_%s_m.jpg' % (
             farm, server, id, secret)
-    urlretrieve(url, dl_path)
+    r = requests.get(url)
+    return r.content
 
 def extract_photo_attribs(photo_element):
     keys = ['farm', 'server', 'id', 'secret']
@@ -29,6 +32,7 @@ def download_by_text(text, file_tag, dl_path, num_photos):
         'page': 1
     }
 
+    hashes = set()
     photo_num = 0
     page = 1
     while num_photos > 0:
@@ -39,11 +43,21 @@ def download_by_text(text, file_tag, dl_path, num_photos):
         r = requests.get(URL, params=params)
         photos = ET.fromstring(r.text)[0]
         for photo in photos:
+            attribs = extract_photo_attribs(photo)
+
+            # Get image contents, check for duplicates
+            image_data = download_photo(**attribs)
+            hash_ = hash(image_data)
+            if hash_ in hashes:
+                continue
+            hashes.add(hash_)
+
+            # Save image to disk
             photo_dl_path = os.path.join(dl_path,
                     '%s_%d.jpg' % (file_tag, photo_num))
-            attribs = extract_photo_attribs(photo)
-            print('Downloading %s_%d.jpg' % (file_tag, photo_num))
-            download_photo(**attribs, dl_path=photo_dl_path)
+            with open(photo_dl_path, 'wb') as f:
+                f.write(image_data)
+            print('Downloaded %s_%d.jpg' % (file_tag, photo_num))
             photo_num += 1
 
         page += 1
@@ -52,7 +66,9 @@ def download_by_text(text, file_tag, dl_path, num_photos):
 
 if __name__ == '__main__':
     if len(sys.argv) < 5:
-        print('Usage: %s: <search text> <file tag> <download path> <# of photos>' % sys.argv[0])
+        print('Usage: %s: ' % sys.argv[0] + \
+              '<search text> <file tag> <download path> <# of photos>')
+        exit(1)
 
     text = sys.argv[1]
     file_tag = sys.argv[2]
